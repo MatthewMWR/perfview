@@ -16,6 +16,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using Address = System.UInt64;
 
@@ -1304,6 +1305,7 @@ namespace Microsoft.Diagnostics.Tracing
         /// Skip a Security ID (SID) starting at 'offset' bytes into the payload blob.
         /// </summary>  
         /// <returns>Offset just after the Security ID</returns>
+        // TODO FUTURE After GetSidInfoAt is battle tested, we should replace the implementation of SkipSid with a call to GetSidInfo in order to consoidate domain logic
         internal int SkipSID(int offset)
         {
             IntPtr mofData = DataStart;
@@ -1434,6 +1436,43 @@ namespace Microsoft.Diagnostics.Tracing
                 throw new Exception("Reading past end of event");
             else
                 return TraceEventRawReaders.ReadUnicodeString(DataStart, offset, EventDataLength);
+        }
+        /// <summary>
+        /// Given a payload offset, returns information about the SID including
+        /// caller supplied offset, supplemental offset (due to padding/prefix), 
+        /// sid length, and SecurityIdentifier value.
+        /// The next payload field is expected to start at caller supplied offset + supplemental offset + sid length
+        /// This is all encapsulated in a method to centralize the domain logic needed for
+        /// GetSidAt, SkipSid, fetch size fixups, and any others
+        /// May throw ApplicationException or exceptions via SecurityIdentifier ctor() in case of unexpected data
+        /// </summary>
+        internal protected Tuple<int, int, int, SecurityIdentifier> GetSidInfoAt(int offset)
+        {
+            // SecurityIdentifier constructor knows how to detect the variable length SID value given
+            // a good starting offset. We use this in order to determine the length and get the value in one go.
+            // Callers may care about the length (skip) or the value (get) or both.
+            // In addition to the caller's supplied offset, the sid bytes are sometimes preceeded by additional bytes due to
+            // TOKEN_USER structure. To account for this we attempt to detect where the actual sid bytes start
+            // before calling SecurityIdentifier ctor.  
+            // In the event we can't find anything, we throw rather than return zeros because
+            // we never figured out how long it should be, and the caller needs to know that we dont know (e.g. in case of skipping)
+            // If throwing is undesirable, we could use some other kind of signal, like a bool to indicate success/failure
+            int callerSuppiedOffset = offset;
+            var remainingPayloadBytes = GetByteArrayAt(offset, EventDataLength - offset);
+            int supplementalOffset = -1;
+            if (IsPlausibleSidByteArray(remainingPayloadBytes)) supplementalOffset = 0;
+            else if(IsPlausibleSidByteArray(remainingPayloadBytes, HostOffset(8, 2))) supplementalOffset = HostOffset(8, 2);
+            if (supplementalOffset < 0) throw new ApplicationException("SecurityIdentifier not found");
+            var sid = new SecurityIdentifier(remainingPayloadBytes, supplementalOffset);
+            return new Tuple<int, int, int, SecurityIdentifier>(callerSuppiedOffset, supplementalOffset, sid.BinaryLength, sid);
+        }
+        /// <summary>
+        /// Given on offset to a SID typed field, get the SID
+        /// </summary>
+        internal protected SecurityIdentifier GetSidAt(int offset)
+        {
+            var sidInfo = GetSidInfoAt(offset);
+            return sidInfo.Item4;
         }
         /// <summary>
         /// Give an offset to a byte array of size 'size' in the payload bytes, return a byte[] that contains
@@ -1856,6 +1895,21 @@ namespace Microsoft.Diagnostics.Tracing
         protected internal void DebugValidate()
         {
             this.Validate();
+        }
+
+        /// <summary>
+        /// SecurityIdentifier knows how to get the variable length SID value from a byte array, but
+        /// the bytes presented to GetSidInfoAt don't always contain or start with a SID value.
+        /// This method exists to quickly check the given bytes for plausibility as a sid value
+        /// before calling SecurityIdentifier ctor(). Alternative would be to catch{} frequently instead.
+        /// </summary>
+        private bool IsPlausibleSidByteArray(byte[] bytes, int offsetToTry = 0)
+        {
+            if (bytes.Length < offsetToTry + 2) return false;
+            if (bytes[offsetToTry] != 1) return false;
+            if (bytes[offsetToTry + 1] > 5) return false;
+            if (bytes.Length < offsetToTry + 8) return false;
+            return true;
         }
 
         // Note that you can't use the ExtendedData, UserData or UserContext fields, they are not set

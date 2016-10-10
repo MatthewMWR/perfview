@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.IO;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -672,6 +673,8 @@ namespace Microsoft.Diagnostics.Tracing.Parsers
                         return GetGuidAt(offset);
                     else if (type == typeof(DateTime))
                         return DateTime.FromFileTime(GetInt64At(offset));
+                    else if (type == typeof(SecurityIdentifier))
+                        return GetSidAt(offset);
                     else
                         return "[UNSUPPORTED TYPE]";
             }
@@ -1213,6 +1216,19 @@ namespace Microsoft.Diagnostics.Tracing.Parsers
                     case RegisteredTraceEventParser.TdhInputType.SYSTEMTIME:
                         Type = typeof(DateTime);
                         Size = 16;
+                        break;
+                    case RegisteredTraceEventParser.TdhInputType.SID:
+                        Type = typeof(SecurityIdentifier);
+                        // TODO NOW   The actual size is instance specific, so this needs run time fixup but I don't know where, see following comment
+                        // This field size and any chained offsets need to be 
+                        // fixed up as soon as we get to an instance. This seems to be an expected pattern per
+                        // RegisterdTraceEventParser's ParseFields, which says...
+                        //      if (size >= DynamicTraceEventData.SPECIAL_SIZES)
+                        //          fieldOffset = ushort.MaxValue;           // Indicate that the offset must be computed at run time. 
+                        // ... but I don't know where this fixup needs to happen.
+                        // Note that once we have an instance we can use GetSidInfoAt to determine the field length
+                        // which will be caller supplied offset + supplemental offset + sid length
+                        Size = UNKNOWN_SIZE;
                         break;
                     default:
                         Size = DynamicTraceEventData.UNKNOWN_SIZE;

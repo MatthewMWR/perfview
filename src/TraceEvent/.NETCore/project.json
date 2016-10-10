@@ -76,7 +76,8 @@
     "System.Threading.Thread": "4.0.0", // For Thread.Sleep()
     "System.Threading.Tasks.Parallel": "4.0.1", // For Parallel
     "System.Diagnostics.Process": "4.1.0", // For ThreadWaitReason, ThreadState (in KernelTraceEventParser).
-    "System.IO.UnmanagedMemoryStream" :  "4.0.1" // for PEFile header reading.  
+    "System.IO.UnmanagedMemoryStream": "4.0.1", // for PEFile header reading.
+    "System.Security.Principal.Windows": "4.0.0" // for SecurityIdentifier
     // "Microsoft.NETCore.App": "1.0.0",
     // "Microsoft.NETCore.App": "1.0.0"
     // "Microsoft.Win32.Registry": "4.0.0"

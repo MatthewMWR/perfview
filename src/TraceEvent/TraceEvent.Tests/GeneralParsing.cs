@@ -6,6 +6,7 @@ using Microsoft.Diagnostics.Tracing;
 using System.Diagnostics;
 using System.Text;
 using System.Collections.Generic;
+using System.Security.Principal;
 
 namespace TraceEventTests
 {
@@ -68,6 +69,9 @@ namespace TraceEventTests
             {
                 // *.etl includes *.etlx (don't know why), filter those out.   
                 if (!etlFilePath.EndsWith("etl", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // skip sid test file which is not yet integrated into baseline system (throws below)
+                if (etlFilePath.EndsWith("SidPayloadEvents.etl", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 Trace.WriteLine(string.Format("Processing the file {0}, Making ETLX and scanning.", Path.GetFullPath(etlFilePath)));
@@ -242,6 +246,48 @@ namespace TraceEventTests
 #if !DEBUG
             Assert.Inconclusive("Run with Debug build to get Thorough testing.");
 #endif
+        }
+
+        /// <summary>
+        /// Tests for handling of Sid typed payload fields
+        /// </summary>
+
+        [DeploymentItem(@"inputs\SidPayloadEvents.etl.zip", "SidPayloadEvents")]
+        [TestMethod]
+        public void ETW_SidParsing()
+        {
+            var pathToZipFile = Path.Combine(Environment.CurrentDirectory, "SidPayloadEvents\\SidPayloadEvents.etl.zip");
+            var pathToUnzippedEtl = Path.Combine(Environment.CurrentDirectory, "SidPayloadEvents\\SidPayloadEvents.etl");
+            var pathToUnzippedSymbols = Path.Combine(Environment.CurrentDirectory, "SidPayloadEvents\\Symbols");
+            var zipReader = new ZippedETLReader(pathToZipFile);
+            zipReader.SymbolDirectory = pathToUnzippedSymbols;
+            zipReader.EtlFileName = pathToUnzippedEtl;
+            zipReader.UnpackAchive();
+            // moving results out here otherwise Asserts get swallowed in Dispatch()
+            SecurityIdentifier kernelProcessEventSid = null;
+            SecurityIdentifier userEventSid = null;
+            string userEventNextField = null;
+            using (var source = new ETWTraceEventSource(pathToUnzippedEtl))
+            {
+                source.Kernel.ProcessGroup += kernelEvent =>
+                {
+                    kernelProcessEventSid = kernelEvent.UserSid;
+                };
+                source.Dynamic.AddCallbackForProviderEvent("Microsoft-Windows-BrokerInfrastructure", "BackgroundTask/Stop", userEvent =>
+                {
+                    userEventSid = (SecurityIdentifier)userEvent.PayloadValue(5);
+                    userEventNextField = userEvent.PayloadString(6);
+                });
+                source.Process();
+            }
+            Assert.IsNotNull(kernelProcessEventSid);
+            Assert.IsInstanceOfType(kernelProcessEventSid, typeof(SecurityIdentifier));
+            Assert.IsFalse(kernelProcessEventSid.Equals(new SecurityIdentifier(WellKnownSidType.NullSid, null)));
+            // TODO NOW This fails until we fix up the fetch lengths based on the sid length found at run time (need Vance's help)
+            Assert.IsNotNull(userEventSid);
+            Assert.IsInstanceOfType(userEventSid, typeof(SecurityIdentifier));
+            Assert.IsFalse(userEventSid.Equals(new SecurityIdentifier(WellKnownSidType.NullSid, null)));
+            Assert.IsTrue(userEventNextField.Equals(@"Microsoft.Windows.CloudExperienceHost_10.0.10586.0_neutral_neutral_cw5n1h2txyewy", StringComparison.OrdinalIgnoreCase));
         }
 
         private static int IncCount(SortedDictionary<string, int> histogram, string eventName)

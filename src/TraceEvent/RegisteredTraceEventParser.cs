@@ -12,6 +12,7 @@ using Microsoft.Diagnostics.Tracing.Session;
 using Microsoft.Diagnostics.Tracing.Extensions;
 using System.IO;
 using System.Threading;
+using System.Security.Principal;
 
 
 namespace Microsoft.Diagnostics.Tracing.Parsers
@@ -836,7 +837,9 @@ namespace Microsoft.Diagnostics.Tracing.Parsers
                     else // A normal type
                     {
                         propertyFetch = new DynamicTraceEventData.PayloadFetch(fieldOffset, propertyInfo->InType, propertyInfo->OutType);
-                        if (propertyFetch.Size == DynamicTraceEventData.UNKNOWN_SIZE)
+                        // Added != typeof SID because for now we still set the size the UNKNOWN_SIZE, but don't want to bomb here.
+                        // As noted elsewhere we need to decide how to represent the size as it is not known until run time (similar to string)
+                        if (propertyFetch.Size == DynamicTraceEventData.UNKNOWN_SIZE && propertyFetch.Type != typeof(SecurityIdentifier))
                         {
                             Trace.WriteLine("    Unknown type for  " + propertyName + " " + propertyInfo->InType.ToString() + " fields from here will be missing.");
                             goto Exit;

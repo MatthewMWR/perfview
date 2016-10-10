@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Security.Principal;
 using System.Text;
 using Utilities;
 using Address = System.UInt64;
@@ -3762,13 +3763,29 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Kernel
     {
         // public int ProcessID { get { if (Version >= 1) return GetInt32At(HostOffset(4, 1)); return (int) GetHostPointer(0); } }
         public int ParentID { get { if (Version >= 1) return GetInt32At(HostOffset(8, 1)); return (int)GetAddressAt(HostOffset(4, 1)); } }
-        // Skipping UserSID
         public string KernelImageFileName { get { if (Version >= 1) return GetUTF8StringAt(GetKernelImageNameOffset()); return ""; } }
         public string ImageFileName { get { return state.KernelToUser(KernelImageFileName); } }
 
         public Address DirectoryTableBase { get { if (Version >= 3) return GetAddressAt(HostOffset(20, 1)); return 0; } }
         public ProcessFlags Flags { get { if (Version >= 4) return (ProcessFlags)GetInt32At(HostOffset(24, 2)); return 0; } }
-
+        public SecurityIdentifier UserSid
+        {
+            get
+            {
+                var offset = Version >= 4 ? HostOffset(28, 2) : (Version >= 3) ? HostOffset(24, 2) : HostOffset(20, 1);
+                // Don't want to throw in getter, will return NullSid worst case
+                SecurityIdentifier returnSid;
+                try
+                {
+                    returnSid = GetSidAt(offset);
+                }
+                catch
+                {
+                    returnSid = new SecurityIdentifier(WellKnownSidType.NullSid, null);
+                }
+                return returnSid;
+            }
+        }
         public int SessionID { get { if (Version >= 1) return GetInt32At(HostOffset(12, 1)); return 0; } }
         public int ExitStatus { get { if (Version >= 1) return GetInt32At(HostOffset(16, 1)); return 0; } }
         public Address UniqueProcessKey { get { if (Version >= 2) return GetAddressAt(0); return 0; } }
